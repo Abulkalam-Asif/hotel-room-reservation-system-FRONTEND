@@ -13,27 +13,29 @@
         <span>Rooms: {{ rooms }}</span> | <span>Adults: {{ adults }}</span> |
         <span>Kids: {{ kids }}</span>
       </div>
+      <button
+        class="proceed-btn"
+        :disabled="!canProceed"
+        @click="proceedToBooking"
+        style="margin-top:1rem;"
+      >
+        Proceed to Booking
+      </button>
+      <div v-if="selectionError" style="color:red; font-size:0.95rem; margin-top:0.5rem;">{{ selectionError }}</div>
     </header>
     <section v-if="error" class="card-section" style="color: red">{{ error }}</section>
     <section v-if="loading" class="card-section">Loading available rooms...</section>
-    <section v-else class="room-listings">
+    <section v-else class="room-listings-grid">
       <div v-if="roomTypes.length === 0 && !loading && !error" class="card-section">
         No rooms available for the selected dates.
       </div>
-      <div v-for="room in roomTypes" :key="room.id" class="room-card card-section">
-        <img :src="room.imageUrl || room.image" :alt="room.title" class="room-img" />
-        <div class="room-info">
-          <h3>{{ room.title }}</h3>
-          <p class="room-price">Price: {{ room.price }} €</p>
-          <button @click="bookNow(room)">Book Now</button>
-          <details v-if="room.amenities">
-            <summary>Amenities</summary>
-            <ul class="amenities-list">
-              <li v-for="amenity in room.amenities" :key="amenity">{{ amenity }}</li>
-            </ul>
-          </details>
-        </div>
-      </div>
+      <RoomCard
+        v-for="room in roomTypes"
+        :key="room.id"
+        :room="room"
+        :selected="selectedRoomIds.includes(room.id)"
+        @select="onSelectRoom"
+      />
     </section>
   </div>
 </template>
@@ -41,6 +43,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import RoomCard from '../components/RoomCard.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -54,6 +57,9 @@ const kids = ref(Number(route.query.kids || 0))
 const roomTypes = ref<any[]>([])
 const loading = ref(false)
 const error = ref('')
+
+const selectedRoomIds = ref<string[]>([])
+const selectionError = ref('')
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
 
@@ -86,6 +92,8 @@ async function fetchAvailableRooms() {
     const res = await fetch(`${API_BASE_URL}/Room/available?${params}`)
     if (res.ok) {
       roomTypes.value = await res.json()
+      // Reset selection on new search
+      selectedRoomIds.value = []
     } else {
       error.value = 'Failed to fetch available rooms.'
     }
@@ -98,22 +106,54 @@ async function fetchAvailableRooms() {
 
 onMounted(fetchAvailableRooms)
 
-function bookNow(room: any) {
+function onSelectRoom({ roomId }: { roomId: string }) {
+  const idx = selectedRoomIds.value.indexOf(roomId)
+  if (idx !== -1) {
+    // Deselect
+    selectedRoomIds.value = selectedRoomIds.value.filter(id => id !== roomId)
+    selectionError.value = ''
+  } else {
+    if (selectedRoomIds.value.length >= rooms.value) {
+      selectionError.value = `You can select up to ${rooms.value} room(s).`
+      return
+    }
+    selectedRoomIds.value = [...selectedRoomIds.value, roomId]
+    selectionError.value = ''
+  }
+}
+
+const canProceed = computed(() => selectedRoomIds.value.length === rooms.value)
+
+function proceedToBooking() {
+  if (!canProceed.value) {
+    selectionError.value = `Please select exactly ${rooms.value} room(s).`
+    return
+  }
+  // Only send room IDs
   router.push({
     name: 'Booking',
     query: {
-      roomId: room.id,
       checkIn: checkIn.value,
       checkOut: checkOut.value,
       adults: adults.value,
       kids: kids.value,
       rooms: rooms.value,
+      selectedRooms: JSON.stringify(selectedRoomIds.value),
     },
   })
 }
 
 function changeDates() {
-  router.push({ name: 'home' })
+  router.push({
+    name: 'home',
+    query: {
+      adults: adults.value,
+      kids: kids.value,
+      rooms: rooms.value,
+      checkIn: checkIn.value,
+      checkOut: checkOut.value,
+    },
+  })
 }
 
 function formatDate(dateStr: string) {
@@ -132,18 +172,18 @@ const formattedCheckOut = computed(() => formatDate(checkOut.value))
 
 <style scoped>
 .main-container {
-  max-width: 900px;
+  max-width: 1100px;
   margin: 2rem auto;
-  padding: 0 1rem;
+  padding: 0 0.1rem;
   display: flex;
   flex-direction: column;
-  gap: 2rem;
+  gap: 0.5rem;
 }
 .card-section {
   background: #fff;
-  border-radius: 12px;
+  border-radius: 8px;
   box-shadow: 0 2px 8px #0001;
-  padding: 2rem;
+  padding: 0.5rem;
 }
 .trip-summary {
   background: #f1f1f1;
@@ -179,75 +219,52 @@ const formattedCheckOut = computed(() => formatDate(checkOut.value))
   font-size: 0.98rem;
   margin-bottom: 0.5rem;
 }
-.room-listings {
-  display: flex;
-  flex-direction: column;
-  gap: 2rem;
+.room-listings-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
 }
-.room-card {
-  display: flex;
-  gap: 2rem;
-  align-items: center;
-  margin-bottom: 0;
+.trip-summary h2 {
+  font-size: 1rem;
 }
-.room-img {
-  width: 180px;
-  height: 120px;
-  object-fit: cover;
-  border-radius: 8px;
-}
-.room-info {
-  flex: 1;
+.room-info h3 {
+  font-size: 0.95rem;
 }
 .room-price {
-  font-weight: bold;
-  margin: 0.5rem 0;
+  font-size: 0.9rem;
 }
 button {
+  width: 100%;
+  font-size: 0.95rem;
+  padding: 0.6rem 0;
+}
+.room-img {
+  height: 120px;
+}
+.proceed-btn {
   background: #0078d4;
   color: #fff;
   border: none;
-  padding: 0.5rem 1.2rem;
+  padding: 0.7rem 1.5rem;
   border-radius: 4px;
-  font-size: 1rem;
+  font-size: 1.1rem;
   cursor: pointer;
-  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
 }
-button:hover {
-  background: #005fa3;
-}
-details {
-  margin-top: 1rem;
-}
-.amenities-list {
-  list-style: disc inside;
-  margin: 0.5rem 0 0 1rem;
-  padding: 0;
+.proceed-btn:disabled {
+  background: #ccc;
+  color: #888;
+  cursor: not-allowed;
 }
 
-@media (max-width: 900px) {
+@media (min-width: 400px) {
   .main-container {
-    padding: 0 0.5rem;
-  }
-  .room-card {
-    flex-direction: column;
-    align-items: flex-start;
     gap: 1rem;
-  }
-  .room-img {
-    width: 100%;
-    height: 180px;
-    max-width: 100%;
-  }
-}
-
-@media (max-width: 600px) {
-  .main-container {
     padding: 0 0.2rem;
-    gap: 1rem;
   }
   .card-section {
     padding: 1rem;
+    border-radius: 8px;
   }
   .trip-summary h2 {
     font-size: 1.1rem;
@@ -259,36 +276,35 @@ details {
     font-size: 0.95rem;
   }
   button {
-    width: 100%;
     font-size: 1rem;
     padding: 0.7rem 0;
   }
 }
 
-@media (max-width: 400px) {
+@media (min-width: 600px) {
   .main-container {
-    padding: 0 0.1rem;
-    gap: 0.5rem;
+    gap: 2rem;
+    padding: 0 0.5rem;
   }
   .card-section {
-    padding: 0.5rem;
-    border-radius: 8px;
+    padding: 2rem;
+    border-radius: 12px;
   }
-  .trip-summary h2 {
-    font-size: 1rem;
+  .room-listings-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 2rem;
   }
-  .room-info h3 {
-    font-size: 0.95rem;
+}
+
+@media (min-width: 900px) {
+  .main-container {
+    padding: 0 1rem;
   }
-  .room-price {
-    font-size: 0.9rem;
-  }
-  button {
-    font-size: 0.95rem;
-    padding: 0.6rem 0;
-  }
-  .room-img {
-    height: 120px;
+}
+
+@media (min-width: 1024px) {
+  .room-listings-grid {
+    grid-template-columns: repeat(3, 1fr);
   }
 }
 </style>

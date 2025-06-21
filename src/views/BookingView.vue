@@ -4,7 +4,7 @@
       <h2>Booking Details</h2>
       <form @submit.prevent="confirmBooking">
         <div class="form-group">
-          <label>Room 1 Guest Name</label>
+          <label>Guest Name</label>
           <div class="row">
             <input v-model="guestFirstName" placeholder="First Name" required />
             <input v-model="guestLastName" placeholder="Last Name" required />
@@ -21,6 +21,9 @@
         <div class="form-group">
           <label>Email Address</label>
           <input v-model="email" type="email" required />
+          <div style="font-size: 0.95em; color: #555; margin-top: 0.2em">
+            Confirmation of reservation will be sent to this email address.
+          </div>
         </div>
         <div class="form-group">
           <label>Mobile Phone Number</label>
@@ -54,47 +57,113 @@
         <div class="important-note">
           This rate is non-refundable and cannot be changed or canceled.
         </div>
-        <button type="submit">Confirm Your Booking</button>
+        <button type="submit" :disabled="bookingLoading">
+          <span
+            v-if="bookingLoading"
+            class="spinner-border spinner-border-sm"
+            role="status"
+            aria-hidden="true"
+          ></span>
+          Confirm Your Booking
+        </button>
       </form>
+      <div v-if="bookingResult" class="booking-result" style="margin-top: 1rem; color: green">
+        <div>{{ bookingResult.Message }}</div>
+        <div v-if="bookingResult.ReservationNumber">
+          Reservation #: {{ bookingResult.ReservationNumber }}
+        </div>
+      </div>
+      <div v-if="bookingError" class="booking-error" style="margin-top: 1rem; color: red">
+        {{ bookingError }}
+      </div>
       <div class="support">Need assistance? Tel. ****1234****</div>
     </div>
     <div class="summary-section card-section">
       <h3 class="summary-title">YOUR BOOKING SUMMARY</h3>
       <div class="summary-row">
         <span>Check-in</span>
-        <!-- <span class="summary-value">{{ formattedCheckIn }}</span> -->
+        <span class="summary-value">{{ checkIn }}</span>
       </div>
       <div class="summary-row">
         <span>Check-out</span>
-        <!-- <span class="summary-value">{{ formattedCheckOut }}</span> -->
+        <span class="summary-value">{{ checkOut }}</span>
       </div>
-      <!-- <div class="summary-row">
-        <span>Rooms</span>
-        <span class="summary-value">{{ rooms }}</span>
-      </div> -->
+      <div class="summary-row" v-for="(room, idx) in selectedRooms" :key="room.id">
+        <span>Room {{ idx + 1 }} Category</span>
+        <span class="summary-value">{{
+          room.title ? room.title.replace(/^Room \d+ - /, '') : 'Room'
+        }}</span>
+      </div>
       <div class="summary-row">
-        <span>Room 1 guests</span>
-        <span class="summary-value">{{ adults }} Adult</span>
+        <span>Total number of adults</span>
+        <span class="summary-value">{{ adults }}</span>
       </div>
       <div class="summary-row rates-row">
-        <span>Avg. nightly rates:</span>
-        <div class="summary-value rate-detail">
-          Room 1:<br />
-          <!-- ${{ nightlyRate.toFixed(2) }} - {{ formattedCheckIn }} -->
-        </div>
+        <span>Avg. nightly rate:</span>
+        <span class="summary-value">
+          €{{
+            selectedRooms.length > 0
+              ? (
+                  selectedRooms.reduce((sum, r) => sum + (r.price || 0), 0) / selectedRooms.length
+                ).toFixed(2)
+              : '0.00'
+          }}
+        </span>
+      </div>
+      <div class="summary-row">
+        <span>Total charge of the stay</span>
+        <span class="summary-value"
+          >€{{ selectedRooms.reduce((sum, r) => sum + (r.price || 0), 0).toFixed(2) }}</span
+        >
+      </div>
+      <div style="font-size: 0.98em; color: #555; margin-top: 0.2em">
+        This is the amount that will be charged to your credit card.
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+
+interface Room {
+  id: string
+  title?: string
+  price?: number
+  imageUrl?: string
+}
 
 const route = useRoute()
 const checkIn = ref(route.query.checkIn || '')
 const checkOut = ref(route.query.checkOut || '')
 const adults = ref(route.query.adults || 2)
+const selectedRoomIds = ref<string[]>([])
+const selectedRooms = ref<Room[]>([])
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
+
+try {
+  if (route.query.selectedRooms) {
+    // Ensure IDs are integers
+    const parsed = JSON.parse(route.query.selectedRooms as string)
+    selectedRoomIds.value = Array.isArray(parsed) ? parsed.map((id) => id.toString()) : []
+  }
+} catch {}
+
+onMounted(async () => {
+  if (selectedRoomIds.value.length > 0) {
+    // Fetch room details for all selected room IDs
+    const params = new URLSearchParams()
+    selectedRoomIds.value.forEach((id) => params.append('ids', id.toString()))
+    const res = await fetch(`${API_BASE_URL}/Room/details?${params}`)
+    if (res.ok) {
+      selectedRooms.value = await res.json()
+    } else {
+      // fallback: just show IDs
+      selectedRooms.value = selectedRoomIds.value.map((id) => ({ id }))
+    }
+  }
+})
 
 const guestFirstName = ref('')
 const guestLastName = ref('')
@@ -111,9 +180,61 @@ const cardType = ref('')
 const cardExpMonth = ref('')
 const cardExpYear = ref('')
 
-function confirmBooking() {
-  // Simulate confirmation and email sending
-  alert('Booking confirmed! Confirmation email sent. Reservation #: 123456')
+const bookingResult = ref<{ ReservationNumber?: string; Message?: string } | null>(null)
+const bookingLoading = ref(false)
+const bookingError = ref('')
+
+async function confirmBooking() {
+  bookingLoading.value = true
+  bookingError.value = ''
+  bookingResult.value = null
+  try {
+    // Prepare payload for all selected rooms
+    const payload = {
+      RoomIds: selectedRooms.value.map((room) => parseInt(room.id)),
+      GuestFirstName: guestFirstName.value,
+      GuestLastName: guestLastName.value,
+      Email: email.value,
+      Phone: phone.value,
+      Country: country.value,
+      Street: street.value,
+      City: city.value,
+      PostalCode: postalCode.value,
+      CardFirstName: cardFirstName.value,
+      CardLastName: cardLastName.value,
+      CardNumber: cardNumber.value,
+      CardType: cardType.value,
+      CardExpMonth: cardExpMonth.value,
+      CardExpYear: cardExpYear.value,
+      CheckIn: checkIn.value,
+      CheckOut: checkOut.value,
+      Adults: adults.value,
+      Kids: 0,
+      Rooms: selectedRooms.value.length,
+      NightlyRate: selectedRooms.value[0]?.price || 0, // Use first room's price for now
+      TotalCharge: selectedRooms.value.reduce((sum, r) => sum + (r.price || 0), 0),
+      IsPaid: false,
+    }
+    const res = await fetch(`${API_BASE_URL}/Booking`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (res.ok) {
+      bookingResult.value = await res.json()
+      alert(bookingResult.value?.Message || 'Booking successful!')
+      window.location.href = '/'
+      return
+    } else {
+      bookingError.value = 'Booking failed. Please try again.'
+      alert(bookingError.value)
+    }
+  } catch (e) {
+    bookingError.value = 'Booking failed. Please try again.'
+    alert(bookingError.value)
+  } finally {
+    bookingLoading.value = false
+  }
 }
 
 // const formattedCheckIn = computed(() => formatDate(checkIn.value))
@@ -212,5 +333,17 @@ button:hover {
   font-size: 0.98rem;
   margin-left: 0.5rem;
   line-height: 1.3;
+}
+.error-message {
+  color: #dc3545;
+  margin-top: 1rem;
+}
+.success-message {
+  color: #155724;
+  background-color: #d4edda;
+  border-color: #c3e6cb;
+  padding: 0.7rem;
+  border-radius: 4px;
+  margin-top: 1rem;
 }
 </style>

@@ -48,14 +48,23 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 
 const router = useRouter()
+const route = useRoute()
 const adults = ref(2)
 const kids = ref(0)
 const rooms = ref(1)
 const checkIn = ref('')
 const checkOut = ref('')
+
+onMounted(() => {
+  if (route.query.adults) adults.value = Number(route.query.adults)
+  if (route.query.kids) kids.value = Number(route.query.kids)
+  if (route.query.rooms) rooms.value = Number(route.query.rooms)
+  if (route.query.checkIn) checkIn.value = String(route.query.checkIn)
+  if (route.query.checkOut) checkOut.value = String(route.query.checkOut)
+})
 
 const hotel = ref<any>(null)
 const hotelLoaded = ref(false)
