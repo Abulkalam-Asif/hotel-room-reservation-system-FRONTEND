@@ -67,10 +67,14 @@
           Confirm Your Booking
         </button>
       </form>
-      <div v-if="bookingResult" class="booking-result" style="margin-top: 1rem; color: green">
-        <div>{{ bookingResult.Message }}</div>
-        <div v-if="bookingResult.ReservationNumber">
-          Reservation #: {{ bookingResult.ReservationNumber }}
+      <div
+        v-if="bookingResult && !bookingError"
+        class="booking-result"
+        style="margin-top: 1rem; color: green"
+      >
+        <div>{{ bookingResult.message }}</div>
+        <div v-if="bookingResult.reservationNumber">
+          Reservation #: {{ bookingResult.reservationNumber }}
         </div>
       </div>
       <div v-if="bookingError" class="booking-error" style="margin-top: 1rem; color: red">
@@ -113,7 +117,9 @@
       <div class="summary-row">
         <span>Total charge of the stay</span>
         <span class="summary-value"
-          >€{{ selectedRooms.reduce((sum, r) => sum + (r.price || 0), 0).toFixed(2) }}</span
+          >€{{
+            selectedRooms.reduce((sum, r) => sum + (r.price || 0) * nights, 0).toFixed(2)
+          }}</span
         >
       </div>
       <div style="font-size: 0.98em; color: #555; margin-top: 0.2em">
@@ -180,9 +186,22 @@ const cardType = ref('')
 const cardExpMonth = ref('')
 const cardExpYear = ref('')
 
-const bookingResult = ref<{ ReservationNumber?: string; Message?: string } | null>(null)
+const bookingResult = ref<{ reservationNumber?: string; message?: string } | null>(null)
 const bookingLoading = ref(false)
 const bookingError = ref('')
+
+function getNights(start: string, end: string): number {
+  const d1 = new Date(start)
+  const d2 = new Date(end)
+  return Math.max(1, Math.ceil((d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24)))
+}
+
+function getString(val: any): string {
+  if (Array.isArray(val)) return val[0] || ''
+  return val || ''
+}
+
+const nights = ref(getNights(getString(checkIn.value), getString(checkOut.value)))
 
 async function confirmBooking() {
   bookingLoading.value = true
@@ -212,7 +231,7 @@ async function confirmBooking() {
       Kids: 0,
       Rooms: selectedRooms.value.length,
       NightlyRate: selectedRooms.value[0]?.price || 0, // Use first room's price for now
-      TotalCharge: selectedRooms.value.reduce((sum, r) => sum + (r.price || 0), 0),
+      TotalCharge: selectedRooms.value.reduce((sum, r) => sum + (r.price || 0) * nights.value, 0),
       IsPaid: false,
     }
     const res = await fetch(`${API_BASE_URL}/Booking`, {
@@ -222,9 +241,17 @@ async function confirmBooking() {
     })
     if (res.ok) {
       bookingResult.value = await res.json()
-      alert(bookingResult.value?.Message || 'Booking successful!')
-      window.location.href = '/'
-      return
+      console.log('Booking result:', bookingResult.value)
+      // Use correct key and logic for success
+      const msg = bookingResult.value?.message || ''
+      if (msg.toLowerCase().includes('confirmed')) {
+        alert(msg)
+        window.location.href = '/'
+        return
+      } else {
+        bookingError.value = msg || 'Booking failed. Please try again.'
+        alert(bookingError.value)
+      }
     } else {
       bookingError.value = 'Booking failed. Please try again.'
       alert(bookingError.value)
